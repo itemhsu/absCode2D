@@ -10,6 +10,150 @@
 #define M 0x80000000
 #define BY2BE(arr, index, t) (((arr[index<<1] - t) & M) >> (31 - index))
 
+#define IMG_SIZE 26
+//#define ESP32ASM
+#ifdef ESP32ASM
+int getSum(unsigned int* array, int rowNum){
+    int i,sum;
+    uint32_t result;
+    uint32_t x
+    sum=0;
+    for (i=0; i<rowNum; i++){
+        x=array[i];
+        __asm__ __volatile__("popc %0, %1" : "=r" (result) : "r" (x));
+        sum+=result;
+    }
+    return sum;
+}
+#else
+int getSum(unsigned int* array, int rowNum){
+    int i,sum;
+    sum=0;
+    for (i=0; i<rowNum; i++){
+        sum+=__builtin_popcountl(array[i]);
+    }
+    return sum;
+}
+#endif
+
+int sizeStatistic(unsigned int* bigger, int* sizeStatistic_result) {
+    unsigned int bigger_tmp_H[32];
+    unsigned int bigger_tmp_V[26];
+    unsigned int bigger_tmp_U[26];
+    unsigned int bigger_tmp_D[26];
+    int i,j;
+
+    // bigger = img > imgThreshold
+    
+    // plt.imshow(bigger)
+    // ...
+
+    // bigger_tmp = bigger[0:26,6:26]
+    for (i = 0; i < 26; i++) {
+        bigger_tmp_V[i] = bigger[i];
+        bigger_tmp_U[i] = bigger[i+6] & 0x3ffffff;
+        bigger_tmp_D[i] = bigger[i] & 0x3ffffff;
+    }
+    
+    for (i = 0; i < 32; i++) {
+        bigger_tmp_H[i] = bigger[i] & 0x3ffffff;
+    }
+
+    for (i = 0; i < 24; i++) {
+        sizeStatistic_result[i] = 0;
+    }
+
+    for (j = 1; j < 7; j++) {
+        for (i = 0; i < 26; i++) {
+            bigger_tmp_V[i] = bigger_tmp_V[i] & (bigger[i+j]);
+            bigger_tmp_U[i] = bigger_tmp_U[i] & ((bigger[i+6-j]>>j) & 0x3ffffff);
+            bigger_tmp_D[i] = bigger_tmp_D[i] & ((bigger[i+j]>>j) & 0x3ffffff);
+        }
+    
+        for (i = 0; i < 32; i++) {
+            bigger_tmp_H[i] = bigger_tmp_H[i] & ((bigger[i]>>j) & 0x3ffffff);
+        }
+        
+        sizeStatistic_result[j-1+0]=getSum(bigger_tmp_H, 32);
+        sizeStatistic_result[j-1+6]=getSum(bigger_tmp_V, 26);
+        sizeStatistic_result[j-1+12]=getSum(bigger_tmp_U, 26);
+        sizeStatistic_result[j-1+18]=getSum(bigger_tmp_D, 26);
+
+    }
+    return 0;
+}
+
+void showStat(int* sizeStatistic_result){
+    int j;
+    for(j=0;j<24;j++){
+        printf("X[%2d]=%3d, ",j,sizeStatistic_result[j]);
+        if(j%6==5) printf("\n");
+    }
+    printf("\n");
+}
+
+int unit_test_sizeStatistic() {
+    unsigned int bigger[32]={0};
+    int sizeStatistic_result[24]={0};
+    //test 0
+    int i,j;
+    for(i=0;i<32;i++){
+        bigger[i]=0xffffffff;
+    }
+    sizeStatistic(bigger, sizeStatistic_result);
+    showStat(sizeStatistic_result);
+
+    for(i=0;i<32;i++){
+        bigger[i]=0xf0f0f0f;
+    }
+    sizeStatistic(bigger, sizeStatistic_result);
+    showStat(sizeStatistic_result);
+    
+    for(i=0;i<32;i++){
+        bigger[i]=0x7f7f7f7f;
+    }
+    sizeStatistic(bigger, sizeStatistic_result);
+    showStat(sizeStatistic_result);
+    
+    for(i=0;i<32;i++){
+        unsigned int pattern=0xf0f0f0f;
+        if ((pattern>>i)&1) bigger[i]=0xffffffff;
+        else bigger[i]=0;
+    }
+    sizeStatistic(bigger, sizeStatistic_result);
+    showStat(sizeStatistic_result);
+    
+    for(i=0;i<32;i++){
+        unsigned int pattern=0x7f7f7f7f;
+        if ((pattern>>i)&1) bigger[i]=0xffffffff;
+        else bigger[i]=0;
+    }
+    sizeStatistic(bigger, sizeStatistic_result);
+    showStat(sizeStatistic_result);
+    
+    for(i=0;i<32;i++){
+        unsigned int pattern=0xf0f0f0f;
+        bigger[i]=((pattern>>i) | (pattern<<(32-i)));
+        //printf("%2d: %x, %8x, %8x,\n",i,bigger[i], (pattern>>i), );
+    }
+    sizeStatistic(bigger, sizeStatistic_result);
+    showStat(sizeStatistic_result);
+ 
+    for(i=0;i<32;i++){
+        unsigned int pattern=0xf0f0f0f;
+        bigger[i]=((pattern<<i) | (pattern>>(32-i)));
+        //printf("%2d: %x, %8x, %8x,\n",i,bigger[i], (pattern>>i), );
+    }
+    sizeStatistic(bigger, sizeStatistic_result);
+    showStat(sizeStatistic_result);
+    
+    return 0;
+}
+
+
+
+
+
 uint32_t calbits(uint8_t arr[64], uint32_t t) {
     uint32_t bits = 0;
     bits |= BY2BE(arr, 0, t);
@@ -96,10 +240,13 @@ int main() {
     int i,j,k;
     // 初始化数组
     k=0;
+    int sizeStatistic_result[24]={0};
+    
+    //測試數據
     for (i = 0; i < INPUT_ROWS; i++) {
         for (j = 0; j < INPUT_COLS; j++) {
             arr[i][j] = k % 255;
-	    k++;
+            k++;
         }
     }
 
@@ -108,10 +255,14 @@ int main() {
     printf("28%% of values are ==> %u\n", value);
     uint32_t bits_array[32] = { 0 };
     calculate_32x32_bits_array(arr, value, bits_array);
-
+    
     for (i=0; i<32; i++){
         printf("%d, %x\n",i, bits_array[i]);
     }
+    
+    sizeStatistic(bits_array, sizeStatistic_result);
+    showStat(sizeStatistic_result);
+
 
     return 0;
 }
