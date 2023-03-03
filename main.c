@@ -13,6 +13,8 @@
 #define IMG_SIZE 26
 //#define ESP32ASM
 #ifdef ESP32ASM
+#include "esp_system.h"
+
 int getSum(unsigned int* array, int rowNum){
     int i,sum;
     uint32_t result;
