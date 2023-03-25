@@ -2,32 +2,14 @@
 #include <stdint.h>
 #include <assert.h>
 #include <stdlib.h>
+#include <math.h>
 
-#define INPUT_ROWS 120
-#define INPUT_COLS 160
-#define HISTOGRAM_ROWS 64
-#define HISTOGRAM_COLS 64
+
 #define M 0x80000000
-#define BY2BE(arr, index, t) (((arr[index<<1] - t) & M) >> (31 - index))
+#define BY2BE(arr, index, t) (((arr[index] - t) & M) >> (31 - index))
 
 #define IMG_SIZE 26
-//#define ESP32ASM
-#ifdef ESP32ASM
-#include "esp_system.h"
 
-int getSum(unsigned int* array, int rowNum){
-    int i,sum;
-    uint32_t result;
-    uint32_t x
-    sum=0;
-    for (i=0; i<rowNum; i++){
-        x=array[i];
-        __asm__ __volatile__("popc %0, %1" : "=r" (result) : "r" (x));
-        sum+=result;
-    }
-    return sum;
-}
-#else
 int getSum(unsigned int* array, int rowNum){
     int i,sum;
     sum=0;
@@ -36,7 +18,7 @@ int getSum(unsigned int* array, int rowNum){
     }
     return sum;
 }
-#endif
+
 
 int sizeStatistic(unsigned int* bigger, int* sizeStatistic_result) {
     unsigned int bigger_tmp_H[32];
@@ -85,6 +67,36 @@ int sizeStatistic(unsigned int* bigger, int* sizeStatistic_result) {
     return 0;
 }
 
+//320 x 240, shift =2; 160 x 120, shift =1, 
+//for 320
+//INPUT_ROWS = 240
+//INPUT_COLS = 320
+//HISTOGRAM_ROWS = 32
+//HISTOGRAM_COLS = 32
+//shift = 2
+
+void subSample32x32(uint8_t* arr, int INPUT_ROWS, int INPUT_COLS, int shift, int HISTOGRAM_ROWS, int HISTOGRAM_COLS, uint8_t* retarray) {
+    int start_row = (INPUT_ROWS >> 1) - (HISTOGRAM_ROWS << (shift - 1));
+    int start_col = (INPUT_COLS >> 1) - (HISTOGRAM_COLS << (shift - 1));
+    int end_row = start_row + (HISTOGRAM_ROWS << shift);
+    int end_col = start_col + (HISTOGRAM_COLS << shift);
+    int step = (1 << shift);
+    int ret_idx = 0;
+    
+    for (int i = start_row; i < end_row; i += step) {
+        for (int j = start_col; j < end_col; j += step) {
+            retarray[ret_idx] = arr[i * INPUT_COLS + j];
+            //printf("i,j,ret_idx,=%d,%d,%d retarray[ret_idx]=%d i*INPUT_COLS+j=%d\n",i,j,ret_idx,retarray[ret_idx], i*INPUT_COLS+j);
+            ret_idx++;
+        }
+    }
+    
+    //for (int i=0; i<32; i++){
+    //    printf(" %3d",retarray[i]);
+    //}
+}
+
+
 void showStat(int* sizeStatistic_result){
     int j;
     for(j=0;j<24;j++){
@@ -93,6 +105,16 @@ void showStat(int* sizeStatistic_result){
     }
     printf("\n");
 }
+
+void showStatF(float* sizeStatistic_result_norm){
+    int j;
+    for(j=0;j<24;j++){
+        printf("X[%2d]=%.4f, ",j,sizeStatistic_result_norm[j]);
+        if(j%6==5) printf("\n");
+    }
+    printf("\n");
+}
+
 
 int unit_test_sizeStatistic() {
     unsigned int bigger[32]={0};
@@ -156,7 +178,7 @@ int unit_test_sizeStatistic() {
 
 
 
-uint32_t calbits(uint8_t arr[64], uint32_t t) {
+uint32_t calbits(uint8_t arr[32], uint32_t t) {
     uint32_t bits = 0;
     bits |= BY2BE(arr, 0, t);
     bits |= BY2BE(arr, 1, t);
@@ -194,78 +216,169 @@ uint32_t calbits(uint8_t arr[64], uint32_t t) {
     return bits;
 }
 
-uint32_t calculate_32x32_bits_array(uint8_t arr[INPUT_ROWS][INPUT_COLS], uint32_t t, uint32_t bits_array[32]) {
-    //uint32_t bits_array[32] = { 0 };
-    uint32_t count = HISTOGRAM_ROWS * HISTOGRAM_COLS;
-    uint32_t start_row = (INPUT_ROWS - HISTOGRAM_ROWS) / 2;
-    uint32_t start_col = (INPUT_COLS - HISTOGRAM_COLS) / 2;
-    int i,j;
-
-    // 统计每个元素的频率
-    j=0;
-    for (i = start_row; i < start_row + HISTOGRAM_ROWS; i++) {
-    	bits_array[j] = calbits(arr[i]+start_col,t);
-	j++;
+//arr size must 32x32
+uint32_t calculate_32x32_bits_array(uint8_t *arr, uint8_t t, uint32_t* bits_array) {
+    for (int i = 0; i < 32; i++) {
+        uint32_t x = calbits(&arr[i * 32], t);
+        bits_array[i] = x;
     }
     return 0;
 }
 
-uint32_t calculate_28_percent(uint8_t arr[INPUT_ROWS][INPUT_COLS]) {
-    uint32_t freq[256] = { 0 };
-    uint32_t count = HISTOGRAM_ROWS * HISTOGRAM_COLS;
-    uint32_t threshold = count * 28 / 100;
-    uint32_t sum = 0;
-    uint32_t start_row = (INPUT_ROWS - HISTOGRAM_ROWS) / 2;
-    uint32_t start_col = (INPUT_COLS - HISTOGRAM_COLS) / 2;
-    int i,j;
 
-    // 统计每个元素的频率
-    for (i = start_row; i < start_row + HISTOGRAM_ROWS; i++) {
-        for (j = start_col; j < start_col + HISTOGRAM_COLS; j++) {
-            freq[arr[i][j]]++;
+
+int calculate_28_percent(uint8_t* arr) {
+    int freq[256]={0};
+    int sum_ = 0;
+    uint8_t arrSize =32;
+    float threshold = arrSize * arrSize * 0.28;
+    threshold=286.5;
+    
+    for (int i = 0; i < arrSize; i++) {
+        for (int j = 0; j < arrSize; j++) {
+            freq[arr[i * 32 + j]] += 1;
+            //printf("freq = %d, number=%d\n",arr[i * 32 + j],freq[arr[i * 32 + j]]);
         }
     }
-
-    // 排序并找到 28% 阈值
-    for (i = 255; i >= 0; i--) {
-            sum += freq[i];
-            if (sum >= threshold) {
-                return i;
+    
+    for (int i = 255; i >= 0; i--) {
+        sum_ += freq[i];
+        //printf("%d, %d, %d\n", i, freq[i], sum_);
+        if (sum_ > threshold) {
+            return i;
         }
     }
-
     return 0;
 }
 
+
+void create_matrices(uint8_t** ref_image, int theta, int scale, uint8_t** output_matrix) {
+    int WIDTH = 42;
+    int HEIGHT = 42;
+    double angle = (theta * 3.14159 / 180);
+    double cos_angle = cos(angle);
+    double sin_angle = sin(angle);
+
+    for (int i = 0; i < HEIGHT; i++) {
+        for (int j = 0; j < WIDTH; j++) {
+            int matrix3 = round(((j - 21) * cos_angle + (i - 21) * sin_angle + 40) * scale);
+            int matrix4 = round((-(j - 21) * sin_angle + (i - 21) * cos_angle + 30) * scale);
+            output_matrix[i][j] = ref_image[matrix4][matrix3];
+        }
+    }
+}
+
+
+void allFeature(uint8_t* arr, int arrRows, int arrCols, uint32_t* sizeStatistic_result) {
+    uint8_t arr_32x32[32 * 32];
+    uint32_t bits_array[32];
+    int t_value;
+    
+    
+    subSample32x32(arr, arrRows, arrCols, 2, 32, 32, arr_32x32);
+    t_value = calculate_28_percent(arr_32x32);
+    //printf("t_value =%d\n",t_value);
+    calculate_32x32_bits_array(arr_32x32, t_value, bits_array);
+    sizeStatistic(bits_array, sizeStatistic_result);
+    //showStat(sizeStatistic_result);
+}
+
+void allFeatureNorm(uint8_t* arr, int arrRows, int arrCols, float* sizeStatistic_result_norm) {
+    int sizeStatistic_result[24];
+    allFeature(arr, arrRows, arrCols, sizeStatistic_result);
+    for (int i = 0; i < 4; i++) {
+        float _sum = 1.0f;
+        for (int j = 0; j < 6; j++) {
+            _sum += sizeStatistic_result[i * 6 + j];
+        }
+        for (int j = 0; j < 6; j++) {
+            sizeStatistic_result_norm[i * 6 + j] = sizeStatistic_result[i * 6 + j] / _sum;
+        }
+    }
+}
+
+/*
 int main() {
-    uint8_t arr[INPUT_ROWS][INPUT_COLS];
+    uint8_t arr[240][320];
     int i,j,k;
     // 初始化数组
     k=0;
-    int sizeStatistic_result[24]={0};
+    float sizeStatistic_result_norm[24]={0};
     
     //測試數據
-    for (i = 0; i < INPUT_ROWS; i++) {
-        for (j = 0; j < INPUT_COLS; j++) {
+    for (i = 0; i < 240; i++) {
+        for (j = 0; j < 320; j++) {
             arr[i][j] = k % 255;
             k++;
         }
     }
 
     // 计算 28% 的值并输出
-    uint32_t value = calculate_28_percent(arr);
-    printf("28%% of values are ==> %u\n", value);
-    uint32_t bits_array[32] = { 0 };
-    calculate_32x32_bits_array(arr, value, bits_array);
     
-    for (i=0; i<32; i++){
-        printf("%d, %x\n",i, bits_array[i]);
-    }
-    
-    sizeStatistic(bits_array, sizeStatistic_result);
-    showStat(sizeStatistic_result);
+    allFeatureNorm((uint8_t *)arr, 240, 320, (float *)sizeStatistic_result_norm);
+        
+    showStatF(sizeStatistic_result_norm);
 
 
     return 0;
 }
+*/
 
+
+
+typedef struct {
+    unsigned char magic[2];
+    unsigned int size;
+    unsigned short reserved1;
+    unsigned short reserved2;
+    unsigned int offset;
+} BMPHeader;
+
+typedef struct {
+    unsigned int header_size;
+    int width;
+    int height;
+    unsigned short color_planes;
+    unsigned short bits_per_pixel;
+    unsigned int compression_method;
+    unsigned int image_size;
+    int x_resolution;
+    int y_resolution;
+    unsigned int num_colors;
+    unsigned int important_colors;
+} BMPInfoHeader;
+
+
+int main() {
+    float sizeStatistic_result_norm[24]={0};
+    int x,y, i;
+    BMPHeader header;
+    BMPInfoHeader info_header;
+
+    FILE* file = fopen("gray_2023_1_16_15_56_33_Image.bmp", "rb");
+    fread(&header, sizeof(BMPHeader), 1, file);
+    fread(&info_header, sizeof(BMPInfoHeader), 1, file);
+
+    int width = 320;
+    int height = 240;
+    //printf("info_header.width=%d, info_header.height=%d\n", width, info_header.height);
+
+    unsigned char* arr = (unsigned char*)malloc(width * height);
+
+    fseek(file, 1024+54, SEEK_SET);
+    for(int p=320*239; p>-1; p-=320){
+        //printf("p=%d\n",p);
+        fread(arr+p, sizeof(unsigned char), 320, file);
+    }
+    allFeatureNorm((uint8_t *)arr, 240, 320, (float *)sizeStatistic_result_norm);
+        
+    showStatF(sizeStatistic_result_norm);
+
+    
+    
+    fclose(file);
+
+    free(arr);
+    
+    return 0;
+}
