@@ -46,11 +46,15 @@ def subSmaple32x32(arr, INPUT_ROWS, INPUT_COLS, shift):
     HISTOGRAM_COLS = int(32)
 
     start_row = (INPUT_ROWS>>1) - (HISTOGRAM_ROWS<<(shift-1))
-    start_col = (INPUT_COLS>>2) - (HISTOGRAM_COLS<<(shift-1))
+    start_col = (INPUT_COLS>>1) - (HISTOGRAM_COLS<<(shift-1))
     end_row = start_row + (HISTOGRAM_ROWS<<shift)
     end_col = start_col + (HISTOGRAM_COLS<<shift)
     step= (1<<shift)
     retarray=arr[start_row:end_row:step, start_col:end_col:step]
+    
+    #for i in range(32):
+    #    print(" %3d",retarray[i])
+
     
     return retarray
 
@@ -124,9 +128,12 @@ def calculate_28_percent(arr,arrSize):
 
     # 排序并找到 28% 阈值
     threshold=arrSize*arrSize*0.28
+    threshold=286.5
+
     for i in range(255, -1, -1):
         sum_ += freq[i]
-        if sum_ >= threshold:
+        #print(i, freq[i], sum_)
+        if sum_ > threshold:
             return i
 
     return 0
@@ -155,7 +162,7 @@ def allFeature(arr):
     arr_32x32=subSmaple32x32(arr, INPUT_ROWS=240, INPUT_COLS=320, shift=2)
     # 计算 28% 的值并输出
     t_value = calculate_28_percent(arr_32x32, arrSize=32)
-    #print("28% of values are ==> {}".format(t_value))
+    print("28% of values are ==> {}".format(t_value))
     bits_array = np.zeros(32, dtype=np.uint32)
     bits_array = calculate_32x32_bits_array(arr_32x32, t_value)
     #show_32x32(arr_32x32,bits_array)
