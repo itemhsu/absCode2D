@@ -1,3 +1,4 @@
+//gcc main.c -std=c99 -lm
 #include <stdio.h>
 #include <stdint.h>
 #include <assert.h>
@@ -269,19 +270,27 @@ void create_matrices(uint8_t** ref_image, int theta, int scale, uint8_t** output
 }
 
 
-void allFeature(uint8_t* arr, int arrRows, int arrCols, uint32_t* sizeStatistic_result) {
-    uint8_t arr_32x32[32 * 32];
-    uint32_t bits_array[32];
+void allFeature_core(uint8_t* arr_32x32, uint32_t* sizeStatistic_result){
     int t_value;
-    
-    
-    subSample32x32(arr, arrRows, arrCols, 2, 32, 32, arr_32x32);
+    uint32_t bits_array[32];
     t_value = calculate_28_percent(arr_32x32);
     //printf("t_value =%d\n",t_value);
     calculate_32x32_bits_array(arr_32x32, t_value, bits_array);
     sizeStatistic(bits_array, sizeStatistic_result);
+}
+
+void allFeature(uint8_t* arr, int arrRows, int arrCols, uint32_t* sizeStatistic_result) {
+    uint8_t arr_32x32[32 * 32];
+
+    //int t_value;
+    
+    
+    subSample32x32(arr, arrRows, arrCols, 2, 32, 32, arr_32x32);
+    allFeature_core(arr_32x32,sizeStatistic_result);
     //showStat(sizeStatistic_result);
 }
+
+
 
 void allFeatureNorm(uint8_t* arr, int arrRows, int arrCols, float* sizeStatistic_result_norm) {
     int sizeStatistic_result[24];
@@ -297,33 +306,20 @@ void allFeatureNorm(uint8_t* arr, int arrRows, int arrCols, float* sizeStatistic
     }
 }
 
-/*
-int main() {
-    uint8_t arr[240][320];
-    int i,j,k;
-    // 初始化数组
-    k=0;
-    float sizeStatistic_result_norm[24]={0};
-    
-    //測試數據
-    for (i = 0; i < 240; i++) {
-        for (j = 0; j < 320; j++) {
-            arr[i][j] = k % 255;
-            k++;
+
+void allFeatureNorm_fine(uint8_t* arr_32x32, int arrRows, int arrCols, float* sizeStatistic_result_norm) {
+    int sizeStatistic_result[24];
+    allFeature_core(arr_32x32, sizeStatistic_result);
+    for (int i = 0; i < 4; i++) {
+        float _sum = 1.0f;
+        for (int j = 0; j < 6; j++) {
+            _sum += sizeStatistic_result[i * 6 + j];
+        }
+        for (int j = 0; j < 6; j++) {
+            sizeStatistic_result_norm[i * 6 + j] = sizeStatistic_result[i * 6 + j] / _sum;
         }
     }
-
-    // 计算 28% 的值并输出
-    
-    allFeatureNorm((uint8_t *)arr, 240, 320, (float *)sizeStatistic_result_norm);
-        
-    showStatF(sizeStatistic_result_norm);
-
-
-    return 0;
 }
-*/
-
 
 
 typedef struct {
